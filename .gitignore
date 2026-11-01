@@ -1,0 +1,11 @@
+.env
+.venv/
+.venv-py39-backup/
+__pycache__/
+*.py[cod]
+__pycache__/
+.ipynb_checkpoints/
+
+# Raw data: download it yourself (see README)
+data/raw/*
+!data/raw/.gitkeep
