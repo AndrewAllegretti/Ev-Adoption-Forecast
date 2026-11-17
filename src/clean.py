@@ -1,7 +1,7 @@
-"""Clean CEC New ZEV Sales data into a county-year table.
+"""Clean CEC New ZEV Sales and LDV Sales data into a county-year table.
 
 Output: data/processed/zev_county_year.csv
-    county, year, bev, phev, fcev, zev_total, n_quarters
+    county, year, bev, phev, fcev, zev_total, n_quarters, ldv_total, zev_share
 """
 from pathlib import Path
 
@@ -9,6 +9,7 @@ import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[1]
 RAW_ZEV = ROOT / "data" / "raw" / "New_ZEV_Sales_Last_updated_10-13-2026_ada.xlsx"
+RAW_LDV = ROOT / "data" / "raw" / "LDV_Sales_and_Shares_Last_updated_10-13-2026_ada.xlsx"
 OUT_ZEV = ROOT / "data" / "processed" / "zev_county_year.csv"
 
 FUEL_MAP = {"electric": "bev", "phev": "phev", "hydrogen": "fcev"}
@@ -78,8 +79,27 @@ def to_county_year(df: pd.DataFrame) -> pd.DataFrame:
     return out.astype({c: "int64" for c in ["year", *FUEL_MAP.values(), "zev_total", "n_quarters"]})
 
 
+def load_ldv(path: Path = RAW_LDV) -> pd.DataFrame:
+    """Total new light-duty sales (ZEV + non-ZEV) per county-year."""
+    df = pd.read_excel(path, sheet_name="Data")
+    df = df.rename(columns={"Data Year": "year", "COUNTY": "county", "Total LDV Sales": "ldv_total"})
+    df["county"] = normalize_county(df["county"])
+    df = df[df["county"] != "Out Of State"]
+    return df.groupby(["county", "year"], as_index=False)["ldv_total"].sum()
+
+
+def add_share(zev: pd.DataFrame, ldv: pd.DataFrame) -> pd.DataFrame:
+    out = zev.merge(ldv, on=["county", "year"], how="left", validate="one_to_one")
+    missing = out[out["ldv_total"].isna()]
+    if not missing.empty:
+        raise ValueError(f"County-years without LDV sales:\n{missing[['county', 'year']]}")
+    out["ldv_total"] = out["ldv_total"].astype("int64")
+    out["zev_share"] = out["zev_total"] / out["ldv_total"]
+    return out
+
+
 def main() -> None:
-    zev = to_county_year(load_zev())
+    zev = add_share(to_county_year(load_zev()), load_ldv())
     OUT_ZEV.parent.mkdir(parents=True, exist_ok=True)
     zev.to_csv(OUT_ZEV, index=False)
     print(f"Wrote {len(zev):,} rows ({zev['county'].nunique()} counties) -> {OUT_ZEV}")
